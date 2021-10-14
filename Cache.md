@@ -40,7 +40,7 @@ data部分存放的数据宽度不会只有1个或者4个字节，在32位机器
 
 容量有限，因此需要流动性。常见算法：随机替换，LRU(时间局部性), FIFO（通常最糟糕）。
 
-一级cache或者核内cache，随即替换和LRU，伪LRU使用较多。伪LRU是从访问较少的里面随机挑出几个,这样可以降低复杂度，精确的LRU太复杂。LRU通常最好
+一级cache或者核内cache，随机替换和LRU，伪LRU使用较多。伪LRU是从访问较少的里面随机挑出几个,这样可以降低复杂度，精确的LRU太复杂。LRU通常最好
 
 ![image-20210907235512673](Cache.assets/image-20210907235512673.png)
 
@@ -61,7 +61,7 @@ data部分存放的数据宽度不会只有1个或者4个字节，在32位机器
 写不分配，写cache失效时，直接写进内存， 一般搭配写穿透
 ```
 
-  
+
 
 ## cache性能分析
 
@@ -69,11 +69,11 @@ data部分存放的数据宽度不会只有1个或者4个字节，在32位机器
 
 IC：inst counter（编译器负责）,中间是cpi ，命中延迟 + 不命中延迟
 
-AMAT降低那么CPUtime就会下降
+AMAT降低那么CPUtime就会下降，其中访问并行性是平摊miss penalty
 
 <img src="Cache.assets/image-20210908091043325.png" alt="image-20210908091043325" style="zoom:50%;" />
 
-到视频1.02H
+
 
 
 
@@ -153,4 +153,45 @@ address calculation计算出存储器的地址，disambiguation检查load/store�
 
 ## cache写入
 
-L1cache分为icache和dcache，注意icache不会被直接写入内容，修改需要借助dcache，将
+L1cache分为icache和dcache，注意icache不会被直接写入内容，修改需要借助dcache，将要改写的指令作为数据写入dcache，然后将dcache中的内容写入L2cache(L2cache被指令和数据共享)，称为clean过程，并将icache中的所有内容置为无效，当处理器再次执行就能使用到被修改的指令。
+
+dcache的写操作和读操作不同，store时只修改cache但是不改变下一级存储器，会导致二者不一致。保持一致性可以在写入dcache的同时也写入下级存储器，称为**write through**，但是该方法执行效率低。另一种方法是store只写入dcache，并加入记号，只有cache这个被标记的line发生变化时才将数据写到下级存储器，称为**write back**，但是该方法会造成dcache和下级存储器中很多地址中的数据不一致，一致性管理负担大。
+
+另一种情况是要写入的地址在dcache不存在，会发生write miss，解决办法如下：1.直接将数据写到下级存储器，而不写到dcache，称为non-write allocate；2. 首先从下级存储器中将这个缺失的地址对应的整个数据块取出，将要写入到dcache中的数据合并到这个数据块，然后将这个被修改过的数据块写入到dcache，称为write allocate。进一步的，为保持一致性，如果将这个数据块也写入到下级存储器，就是write through，如果只是将dcache中对应line标记为dirty， 替换时才写到下级，称为write back。
+
+有一个问题，dcache发生写缺失时，为什么不找一个line写入，同时也写入下一级存储器？为什么需要从下级存储器读一整个数据块写入dcache？因为存储器中store最多写入一个字，写入该line时，该Line被标记为dirty，那么其他数据和下级存储器对应地址的数据会不一致。如下图
+
+<img src="Cache.assets/image-20210911154304759.png" alt="image-20210911154304759" style="zoom:50%;" />
+
+通常write through配合non-write allocate使用，都是直接将数据更新到下级存储器。如下图
+
+<img src="Cache.assets/image-20210911154819428.png" alt="image-20210911154819428" style="zoom: 33%;" />
+
+write back和write allocate也是配合使用的 ，见下图
+
+<img src="Cache.assets/image-20210911155051945.png" alt="image-20210911155051945" style="zoom: 33%;" />
+
+## cache替换
+
+如果dcache发生缺失，需要从对应的cache set中找到一个Line存放下级存储器读出的数据，但是如果line都被占用，此时需要替换。有如下算法
+
+### LRU
+
+需跟踪每个cache line的使用情况，为每个cache line设置age部分，每当一个cache line被访问，age++，最终age最小的被替换。一个2way set-associative中的例子如下，这里使用了伪LRU算法，可以降低开销，通常最好
+
+<img src="Cache.assets/image-20210911160321315.png" alt="image-20210911160321315" style="zoom:33%;" />
+
+### 随机替换
+
+使用clock algorithm实现近似随机，clock是一个计数器，举例来说，如果是8-way set-associative则计数器宽度为3，每次需要替换时就使用计数器当前值替换对应的Line。
+
+
+
+## 提高cache性能
+
+### 写缓存
+
+dcache miss通常会串行执行，miss时需要从下一级存储器读取数据，写入指定cache line，如果该line是dirty，则首先要写入到下一级存储器中，这两步需要串行执行。但是下级存储器的访问时间较长，使用写缓存，dirty的cache line会首先写到write buffer当中，等到下级存储器有空闲时，才会将缓存的数据写到下级存储器。
+
+<img src="Cache.assets/image-20210911211735170.png" alt="image-20210911211735170" style="zoom:50%;" />
+
